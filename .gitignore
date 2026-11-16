@@ -29,3 +29,6 @@ annotations/
 templates/
 exports/
 sources/
+
+# Build output for the marketplace listing package
+listing/agensi/dist/
