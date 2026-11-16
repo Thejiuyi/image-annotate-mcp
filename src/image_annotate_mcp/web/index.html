@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图片标注台 · image-annotate-mcp</title>
+<style>
+  :root{
+    --bg:#12141a; --panel:#1b1e26; --line:#2b303c; --fg:#e8eaf0; --dim:#8b93a7;
+    --acc:#4a9eff; --box:#ff5f6d; --pt:#ffd166; --poly:#7ee787; --ok:#3fb950; --warn:#d29922;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+       display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel);
+         border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header .title{font-weight:600;font-size:14px}
+  .pill{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:999px;
+        padding:1px 8px;white-space:nowrap}
+  .pill.ok{color:var(--ok);border-color:rgba(63,185,80,.5)}
+  .pill.warn{color:var(--warn);border-color:rgba(210,153,34,.5)}
+  .grow{flex:1}
+  button{background:#252a35;color:var(--fg);border:1px solid var(--line);border-radius:6px;
+         padding:5px 10px;cursor:pointer;font-size:12px;font-family:inherit}
+  button:hover:not(:disabled){border-color:var(--acc)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.on{background:var(--acc);border-color:var(--acc);color:#08101c;font-weight:600}
+  button.pri{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  button.pri:hover{background:#2f7ff5}
+  #tabs{display:flex;gap:4px;overflow:auto;max-width:46vw}
+  #tabs button{max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  main{display:flex;gap:10px;padding:10px;align-items:stretch;flex:1;min-height:0;
+       overflow:hidden}
+  /* 视口固定：图像在里面被 zoom/pan 变换，页面本身不滚动 */
+  #stage{position:relative;flex:1;min-width:0;overflow:hidden;border-radius:8px;
+         background:#0b0d12}
+  #stage img{position:absolute;left:0;top:0;transform-origin:0 0;display:block;
+             user-select:none;-webkit-user-drag:none}
+  #cv{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;touch-action:none}
+  #cv.hidden-layer{cursor:default}
+  aside{width:340px;flex:none;background:var(--panel);border:1px solid var(--line);
+        border-radius:8px;padding:10px;overflow:auto}
+  .item{border:1px solid var(--line);border-radius:6px;padding:7px;margin-bottom:7px;cursor:pointer}
+  .item.sel{border-color:var(--acc);background:rgba(74,158,255,.06)}
+  .item.off{opacity:.45}
+  .row{display:flex;gap:6px;align-items:center}
+  .tag{font-size:11px;padding:1px 6px;border-radius:4px;background:#2a3040;color:var(--dim);
+       flex:none}
+  .tag.box{color:#ff9aa2} .tag.point{color:#ffe08a} .tag.polygon{color:#9ff0ad}
+  .eye{flex:none;width:22px;padding:2px 0;font-size:12px;line-height:1;text-align:center;
+       border-radius:4px}
+  .eye.off{color:var(--dim)}
+  .coord{font-family:Consolas,"Courier New",monospace;font-size:11px;color:var(--dim)}
+  .hint{color:var(--dim);font-size:12px;line-height:1.75}
+  .hint kbd{background:#252a35;border:1px solid var(--line);border-radius:4px;padding:0 5px;
+            font-size:11px;font-family:inherit}
+  input[type=text]{background:#0e1016;color:var(--fg);border:1px solid var(--line);
+                   border-radius:5px;padding:4px 7px;font-size:12px;width:100%;
+                   font-family:inherit;min-width:0}
+  input[type=text]:focus{outline:none;border-color:var(--acc)}
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#1f6feb;
+         color:#fff;padding:9px 18px;border-radius:20px;font-size:13px;opacity:0;
+         transition:opacity .25s;pointer-events:none;max-width:70vw;text-align:center;z-index:99}
+  #toast.show{opacity:1}
+  #toast.err{background:#b62324}
+  #toast.ok{background:#1a7f37}
+  #err{display:none;margin:10px;padding:12px;border:1px solid #b62324;border-radius:8px;
+       background:rgba(182,35,36,.1);color:#ffb4b4;font-size:13px;line-height:1.7}
+  .empty{color:var(--dim);font-size:12px;text-align:center;padding:18px 0}
+  /* 左下角视图条：缩放 + 两个开关 */
+  #viewbar{position:absolute;left:10px;bottom:10px;display:flex;align-items:center;gap:4px;
+           padding:4px 6px;border-radius:8px;background:rgba(27,30,38,.93);
+           border:1px solid var(--line);z-index:6;box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  #viewbar button{padding:2px 7px;font-size:11px}
+  #viewbar select{background:#0e1016;color:var(--fg);border:1px solid var(--line);
+                  border-radius:5px;padding:2px 4px;font-size:11px;font-family:inherit}
+  #viewbar select:disabled{opacity:.4}
+  #viewbar .sep{width:1px;height:16px;background:var(--line);margin:0 3px}
+  /* 放大镜：整块不吃鼠标事件，只有标题栏可以拖，否则没法在它下面继续标注 */
+  #loupe{position:absolute;left:0;top:0;width:202px;z-index:7;pointer-events:none;
+         border:1px solid var(--acc);border-radius:8px;overflow:hidden;background:#0b0d12;
+         box-shadow:0 10px 28px rgba(0,0,0,.62)}
+  #loupe[hidden]{display:none}
+  #loupe .lh{display:flex;justify-content:space-between;align-items:center;gap:6px;
+             padding:2px 6px;background:var(--panel);border-bottom:1px solid var(--line);
+             font-size:11px;color:var(--dim);pointer-events:auto;cursor:move;
+             user-select:none;white-space:nowrap}
+  #loupe .lh button{padding:1px 6px;font-size:10px}
+  #loupeCv{display:block;width:200px;height:200px}
+</style>
+</head>
+<body>
+<header>
+  <span class="title">图片标注台</span>
+  <span class="pill" id="sessionPill">-</span>
+  <span class="pill" id="statePill">未保存</span>
+  <div id="tabs"></div>
+  <span class="grow"></span>
+  <button id="mBox" class="on" title="拖矩形 = 裁模板">框选 <kbd>1</kbd></button>
+  <button id="mPt" title="单击 = 记点击坐标">点选 <kbd>2</kbd></button>
+  <button id="mPoly" title="逐点单击围出不规则图形，点回起点/双击/回车闭合">多边形 <kbd>3</kbd></button>
+  <button id="undo" title="Ctrl+Z">撤销</button>
+  <button id="redo" title="Ctrl+Shift+Z">重做</button>
+  <button id="del" title="Delete">删除选中</button>
+  <button id="hide" title="隐藏/显示全部标注（H）">隐藏标注 <kbd>H</kbd></button>
+  <button id="fresh" style="display:none" title="重新抓一张当前画面">重抓画面</button>
+  <span class="coord" id="cursor">-</span>
+  <input type="text" id="setName" style="width:140px" title="标注名（决定文件名）" value="board_ui">
+  <button id="save" class="pri">保存</button>
+</header>
+<div id="err"></div>
+<main>
+  <div id="stage">
+    <img id="img" alt="">
+    <canvas id="cv"></canvas>
+    <div id="viewbar">
+      <button id="zoomOut" title="缩小">&minus;</button>
+      <button id="zoomFit" title="点击回到「适应窗口」（Ctrl+0）">100%</button>
+      <button id="zoomIn" title="放大">+</button>
+      <span class="sep"></span>
+      <button id="wheelToggle" class="on" title="鼠标滚轮缩放（默认开）">滚轮缩放</button>
+      <button id="loupeToggle" title="放大镜：显示光标周围 N×N 像素的放大图（L）">放大镜</button>
+      <select id="loupeSize" title="放大镜取样范围（图像像素）" disabled>
+        <option value="40">40&times;40</option>
+        <option value="60">60&times;60</option>
+        <option value="80" selected>80&times;80</option>
+        <option value="120">120&times;120</option>
+      </select>
+    </div>
+    <div id="loupe" hidden>
+      <div class="lh">
+        <span id="loupeInfo">80&times;80</span>
+        <button id="loupePin" title="拖标题栏可移动窗口；点这里切回自动跟随">跟随中</button>
+      </div>
+      <canvas id="loupeCv"></canvas>
+    </div>
+  </div>
+  <aside>
+    <div class="hint" style="margin-bottom:10px">
+      <b>框选</b>：拖一个矩形 → 裁成模板<br>
+      <b>点选</b>：单击 → 记一个点击坐标<br>
+      <b>多边形</b>：逐点单击围出不规则形状，<br>
+      &nbsp;&nbsp;点回起点 / 双击 / <kbd>Enter</kbd> 闭合，
+      <kbd>Backspace</kbd> 退一个点，<kbd>Esc</kbd> 放弃<br>
+      选中后可拖动；框有 8 个把手，多边形可拖单个顶点。<br>
+      列表左边的 <b>眼睛</b> 可单独隐藏一项，<kbd>H</kbd> 隐藏全部。<br>
+      <b>滚轮</b>缩放（默认开），<kbd>空格</kbd>+拖 或 <b>中键</b>拖 平移，
+      <kbd>Ctrl</kbd>+<kbd>0</kbd> 复位。<br>
+      左下角 <b>放大镜</b>（<kbd>L</kbd>）看光标周围 N&times;N 像素，默认关。<br>
+      <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 切工具 <kbd>Del</kbd> 删除
+      <kbd>Ctrl</kbd>+<kbd>Z</kbd> 撤销
+    </div>
+    <div id="list"></div>
+  </aside>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+const imgEl  = document.getElementById('img');
+const cv     = document.getElementById('cv');
+const ctx    = cv.getContext('2d');
+const stage  = document.getElementById('stage');
+const listEl = document.getElementById('list');
+
+const COLORS = { box:'#ff5f6d', point:'#ffd166', polygon:'#7ee787' };
+
+const S = {
+  session:'', name:'board_ui', images:[], cur:0, mode:'box', sel:-1, scale:1,
+  dirty:false,
+  poly:null,        // 正在画的多边形顶点（图像坐标）
+  hover:null,       // 画多边形时的鼠标位置（图像坐标）
+  hideAll:false,    // 全局隐藏标注图层
+  // 视图：zoom=1 表示「适应窗口」，pan 是图像左上角相对视口的偏移（CSS px）
+  zoom:1, panX:0, panY:0, fitW:0, fitH:0, viewW:0, viewH:0,
+  wheelZoom:true,   // 滚轮缩放，默认开
+  space:false,      // 按住空格拖 = 平移
+  loupe:false,      // 放大镜，默认关
+  loupeN:80,        // 放大镜取样边长（图像像素）
+  loupePinned:false,
+  loupeW:202, loupeH:222,
+  lastPt:null       // 最后一次指针所在的图像坐标
+};
+
+// 画布整体被 zoom 放大过，想让线宽/字号在屏幕上保持恒定，就得先除回去
+function zpx(n){ return n / S.zoom; }
+
+let undoStack = [];
+let redoStack = [];
+let drag = null;          // {kind:'new'|'move'|'resize'|'polymove'|'vertex', ...}
+
+/* ---------- helpers ---------- */
+
+function toast(msg, kind){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show' + (kind ? ' ' + kind : '');
+  clearTimeout(t._h);
+  t._h = setTimeout(()=>{ t.className = ''; }, 2600);
+}
+
+function showError(msg){
+  const box = document.getElementById('err');
+  box.style.display = 'block';
+  box.textContent = msg;
+}
+
+function cur(){ return S.images[S.cur]; }
+function items(){ return cur() ? cur().items : []; }
+function size(){ return cur() ? cur().size : [0, 0]; }
+
+function snapshot(){ return JSON.stringify(S.images.map(m => m.items)); }
+
+function pushUndo(){
+  const s = snapshot();
+  if (undoStack.length && undoStack[undoStack.length-1] === s) return;
+  undoStack.push(s);
+  if (undoStack.length > 120) undoStack.shift();
+  redoStack.length = 0;
+  markDirty();
+}
+
+function applySnapshot(s){
+  const arr = JSON.parse(s);
+  arr.forEach((list, i) => { if (S.images[i]) S.images[i].items = list; });
+  const n = items().length;
+  S.sel = n ? Math.min(S.sel < 0 ? n - 1 : S.sel, n - 1) : -1;
+  renderList(); draw();
+}
+
+function undo(){
+  if (!undoStack.length) return;
+  const now = snapshot();
+  const prev = undoStack.pop();
+  if (prev === now) { undo(); return; }
+  redoStack.push(now);
+  applySnapshot(prev);
+  markDirty();
+}
+
+function redo(){
+  if (!redoStack.length) return;
+  const now = snapshot();
+  const next = redoStack.pop();
+  undoStack.push(now);
+  applySnapshot(next);
+  markDirty();
+}
+
+function markDirty(){
+  S.dirty = true;
+  setState('未保存', 'warn');
+}
+
+function setState(text, kind){
+  const el = document.getElementById('statePill');
+  el.textContent = text;
+  el.className = 'pill' + (kind ? ' ' + kind : '');
+}
+
+function clampPt(p){
+  const [w, h] = size();
+  return [Math.max(0, Math.min(Math.round(p[0]), Math.max(0, w-1))),
+          Math.max(0, Math.min(Math.round(p[1]), Math.max(0, h-1)))];
+}
+
+/* ---------- geometry ---------- */
+
+// 重新量视口、算「适应窗口」尺寸。zoom 保留，只有 resetView 才归 1。
+function layout(){
+  const m = cur();
+  if (!m || !imgEl.naturalWidth) return;
+  const vw = Math.max(1, stage.clientWidth), vh = Math.max(1, stage.clientHeight);
+  const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
+  // contain：整张图必须装得下，否则 zoom=1 时会有够不到的边
+  const k = Math.min(vw / nw, vh / nh);
+  S.fitW = Math.max(1, nw * k);
+  S.fitH = Math.max(1, nh * k);
+  S.scale = nw / S.fitW;
+  S.viewW = vw; S.viewH = vh;
+  imgEl.style.width  = S.fitW + 'px';
+  imgEl.style.height = S.fitH + 'px';
+  cv.style.width = vw + 'px';
+  cv.style.height = vh + 'px';
+  const dpr = window.devicePixelRatio || 1;
+  cv.width  = Math.max(1, Math.round(vw * dpr));
+  cv.height = Math.max(1, Math.round(vh * dpr));
+  if (S.zoom === 1) centerPan(); else clampPan();
+  applyView();
+}
+
+// 只保证「图像没被拖出视野」，不做居中 —— 居中会跟滚轮缩放的锚点抢方向：
+// 缩放时算好的偏移被强制拉回中间，光标下的像素就漂了。
+function clampPan(){
+  const w = S.fitW * S.zoom, h = S.fitH * S.zoom;
+  const keep = 80;                       // 至少留 80px 图像在视口里
+  S.panX = Math.min(S.viewW - keep, Math.max(keep - w, S.panX));
+  S.panY = Math.min(S.viewH - keep, Math.max(keep - h, S.panY));
+}
+
+// 居中只在「适应窗口」和复位时做一次，是策略不是约束
+function centerPan(){
+  S.panX = (S.viewW - S.fitW * S.zoom) / 2;
+  S.panY = (S.viewH - S.fitH * S.zoom) / 2;
+  clampPan();
+}
+
+function applyView(){
+  imgEl.style.transform = `translate(${S.panX}px, ${S.panY}px) scale(${S.zoom})`;
+  // 放大到 2 倍以上就关掉平滑，看到的是真实像素而不是糊成一团
+  imgEl.style.imageRendering = S.zoom >= 2 ? 'pixelated' : 'auto';
+  const btn = document.getElementById('zoomFit');
+  btn.textContent = Math.round(S.zoom * 100) + '%';
+  btn.classList.toggle('on', S.zoom > 1.001);
+  draw();
+  clampLoupe();
+}
+
+function resetView(){
+  S.zoom = 1;
+  centerPan();
+  applyView();
+}
+
+// 以视口坐标 (cx, cy) 为锚点缩放：锚点底下的那个图像像素不动
+function zoomAt(factor, cx, cy){
+  if (!cur() || !imgEl.naturalWidth) return;
+  const nz = Math.min(16, Math.max(1, S.zoom * factor));
+  if (Math.abs(nz - S.zoom) < 1e-6) return;
+  const r = cv.getBoundingClientRect();
+  const vx = cx - r.left, vy = cy - r.top;
+  const fx = (vx - S.panX) / S.zoom, fy = (vy - S.panY) / S.zoom;
+  S.zoom = nz;
+  S.panX = vx - fx * nz;
+  S.panY = vy - fy * nz;
+  clampPan();
+  applyView();
+  if (S.loupe && S.lastPt) drawLoupe(S.lastPt[0], S.lastPt[1]);
+}
+
+function toImg(ev){
+  const [fx, fy] = viewPt(ev);
+  return [Math.round(fx * S.scale), Math.round(fy * S.scale)];
+}
+
+// 视口 CSS 坐标 -> 「适应窗口」坐标系（画布绘制和命中判定用的都是这一套）
+function viewPt(ev){
+  const r = cv.getBoundingClientRect();
+  return [(ev.clientX - r.left - S.panX) / S.zoom,
+          (ev.clientY - r.top  - S.panY) / S.zoom];
+}
+
+function cssRect(box){
+  const s = 1 / S.scale;
+  return [box[0]*s, box[1]*s, box[2]*s, box[3]*s];
+}
+
+function cssPoint(p){ return [p[0] / S.scale, p[1] / S.scale]; }
+
+const HANDLES = ['nw','n','ne','e','se','s','sw','w'];
+
+function handlePoints(box){
+  const [x,y,w,h] = cssRect(box);
+  return {
+    nw:[x,y], n:[x+w/2,y], ne:[x+w,y],
+    e:[x+w,y+h/2], se:[x+w,y+h], s:[x+w/2,y+h],
+    sw:[x,y+h], w:[x,y+h/2]
+  };
+}
+
+function hitHandle(px, py){
+  if (S.sel < 0) return null;
+  const it = items()[S.sel];
+  if (!it || it.type !== 'box') return null;
+  const pts = handlePoints(it.box);
+  const tol = 7 / S.zoom;                     // 屏幕上恒定 7px，不随缩放变松
+  for (const name of HANDLES){
+    const [hx,hy] = pts[name];
+    if (Math.abs(px-hx) <= tol && Math.abs(py-hy) <= tol) return name;
+  }
+  return null;
+}
+
+function hitVertex(px, py){
+  if (S.sel < 0) return -1;
+  const it = items()[S.sel];
+  if (!it || it.type !== 'polygon') return -1;
+  const tol = 7 / S.zoom;
+  for (let k = 0; k < it.points.length; k++){
+    const [vx, vy] = cssPoint(it.points[k]);
+    if (Math.abs(px-vx) <= tol && Math.abs(py-vy) <= tol) return k;
+  }
+  return -1;
+}
+
+// ray casting: 点在多边形内（pts 用 CSS 像素，py/px 同坐标系）
+function pointInPoly(px, py, pts){
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++){
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)){
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function hitItem(px, py){
+  for (let i = items().length - 1; i >= 0; i--){
+    const it = items()[i];
+    if (it.hidden) continue;
+    if (it.type === 'box'){
+      const [x,y,w,h] = cssRect(it.box);
+      if (px >= x && px <= x+w && py >= y && py <= y+h) return i;
+    } else if (it.type === 'point'){
+      const [x,y] = cssPoint(it.point);
+      if (Math.hypot(px-x, py-y) <= 10 / S.zoom) return i;
+    } else if (it.type === 'polygon'){
+      if (pointInPoly(px, py, it.points.map(cssPoint))) return i;
+    }
+  }
+  return -1;
+}
+
+/* ---------- drawing ---------- */
+
+function draw(){
+  const dpr = window.devicePixelRatio || 1;
+  ctx.save();
+  // 先用单位变换擦干净整块画布，再挂 zoom/pan —— 否则 clearRect 会被一起放大
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(dpr * S.zoom, 0, 0, dpr * S.zoom, dpr * S.panX, dpr * S.panY);
+  const s = 1 / S.scale;
+  ctx.font = `600 ${zpx(13)}px "Microsoft YaHei",system-ui,sans-serif`;
+
+  if (!S.hideAll){
+    items().forEach((it, i) => {
+      if (it.hidden) return;
+      const on = i === S.sel;
+      const label = it.name || ('item'+(i+1));
+      if (it.type === 'box'){
+        const [x,y,w,h] = it.box;
+        // 深色打底：红框压在红按钮上也要看得见
+        ctx.strokeStyle = 'rgba(0,0,0,.55)';
+        ctx.lineWidth = zpx((on ? 3 : 2) + 2);
+        ctx.strokeRect(x*s, y*s, w*s, h*s);
+        ctx.strokeStyle = COLORS.box;
+        ctx.lineWidth = zpx(on ? 3 : 2);
+        ctx.strokeRect(x*s, y*s, w*s, h*s);
+        drawLabel(label, x*s, y*s, COLORS.box);
+      } else if (it.type === 'point'){
+        const [x,y] = it.point;
+        for (const [colour, extra] of [['rgba(0,0,0,.55)', 2], [COLORS.point, 0]]){
+          ctx.strokeStyle = colour;
+          ctx.lineWidth = zpx((on ? 3 : 2) + extra);
+          const r = zpx(on ? 9 : 7), arm = zpx(13);
+          ctx.beginPath(); ctx.arc(x*s, y*s, r, 0, Math.PI*2); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x*s-arm, y*s); ctx.lineTo(x*s+arm, y*s);
+          ctx.moveTo(x*s, y*s-arm); ctx.lineTo(x*s, y*s+arm);
+          ctx.stroke();
+        }
+        // 带底色的 chip，纯文字压浅背景会糊
+        drawLabel(label, x*s+zpx(15), y*s-zpx(6), COLORS.point);
+      } else if (it.type === 'polygon'){
+        const pts = it.points.map(cssPoint);
+        strokePath(pts, true, on, COLORS.polygon, true);
+        drawLabel(label, pts[0][0], pts[0][1], COLORS.polygon);
+      }
+    });
+
+    const sel = S.sel >= 0 ? items()[S.sel] : null;
+    if (sel && !sel.hidden){
+      if (sel.type === 'box'){
+        const pts = handlePoints(sel.box);
+        ctx.fillStyle = '#4a9eff';
+        ctx.strokeStyle = '#0b0d12';
+        ctx.lineWidth = 1;
+        const hs = zpx(4), hw = zpx(8);
+        for (const name of HANDLES){
+          const [hx,hy] = pts[name];
+          ctx.beginPath(); ctx.rect(hx-hs, hy-hs, hw, hw); ctx.fill(); ctx.stroke();
+        }
+      } else if (sel.type === 'polygon'){
+        const hs = zpx(4), hw = zpx(8);
+        sel.points.forEach(p => {
+          const [vx, vy] = cssPoint(p);
+          ctx.fillStyle = '#4a9eff';
+          ctx.strokeStyle = '#0b0d12';
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.rect(vx-hs, vy-hs, hw, hw); ctx.fill(); ctx.stroke();
+        });
+      }
+    }
+  }
+
+  // 正在拖的新框
+  if (drag && drag.kind === 'new'){
+    const x = Math.min(drag.x0, drag.x1), y = Math.min(drag.y0, drag.y1);
+    const w = Math.abs(drag.x1-drag.x0), h = Math.abs(drag.y1-drag.y0);
+    ctx.setLineDash([zpx(6), zpx(4)]);
+    ctx.strokeStyle = '#4a9eff';
+    ctx.lineWidth = zpx(2);
+    ctx.strokeRect(x*s, y*s, w*s, h*s);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(74,158,255,.9)';
+    ctx.font = `${zpx(12)}px Consolas,monospace`;
+    ctx.fillText(`${Math.round(w)}×${Math.round(h)}`, x*s + zpx(4), y*s - zpx(5));
+  }
+
+  // 正在画的多边形
+  if (S.poly && S.poly.length){
+    const pts = S.poly.map(cssPoint);
+    ctx.setLineDash([zpx(6), zpx(4)]);
+    ctx.strokeStyle = COLORS.polygon;
+    ctx.lineWidth = zpx(2);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    if (S.hover){
+      const [hx, hy] = cssPoint(S.hover);
+      ctx.lineTo(hx, hy);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    pts.forEach((p, k) => {
+      ctx.fillStyle = k === 0 ? COLORS.polygon : '#4a9eff';
+      ctx.strokeStyle = '#0b0d12';
+      ctx.lineWidth = 1;
+      const r = zpx(k === 0 ? 5 : 3.5);
+      ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    });
+
+    ctx.fillStyle = 'rgba(126,231,135,.95)';
+    ctx.font = `${zpx(12)}px Consolas,monospace`;
+    const tip = pts.length >= 3 ? `${pts.length} 点 · 点起点或双击闭合` : `${pts.length} 点（至少 3 点）`;
+    ctx.fillText(tip, pts[pts.length-1][0] + zpx(8), pts[pts.length-1][1] - zpx(8));
+  }
+  ctx.restore();
+}
+
+// 统一描边：先深色打底再上亮色，fill 用半透明
+function strokePath(pts, closed, on, color, fill){
+  if (!pts.length) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k][0], pts[k][1]);
+  if (closed) ctx.closePath();
+  if (fill){
+    ctx.fillStyle = 'rgba(126,231,135,.13)';
+    ctx.fill();
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,.55)';
+  ctx.lineWidth = zpx((on ? 3 : 2) + 2);
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = zpx(on ? 3 : 2);
+  ctx.stroke();
+}
+
+function drawLabel(text, x, y, color){
+  const w = ctx.measureText(text).width + zpx(10);
+  // 别让标签跑出视口上沿（-panY/zoom 就是视口顶边在「适应窗口」坐标系里的位置）
+  const ty = Math.max(-S.panY / S.zoom, y - zpx(19));
+  ctx.fillStyle = color;
+  ctx.fillRect(x, ty, w, zpx(18));
+  ctx.fillStyle = '#0b0d12';
+  ctx.fillText(text, x + zpx(5), ty + zpx(13));
+}
+
+/* ---------- sidebar ---------- */
+
+function coordText(it){
+  if (it.type === 'box'){
+    return `x ${it.box[0]} y ${it.box[1]}  ${it.box[2]}×${it.box[3]}`;
+  }
+  if (it.type === 'point') return `(${it.point[0]}, ${it.point[1]})`;
+  const xs = it.points.map(p => p[0]), ys = it.points.map(p => p[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  // max - min, not +1: a box dragged to the same extent reports max - min too, and
+  // two tools showing two different widths for the same outline is a bug report.
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  return `${it.points.length} 点 · bbox x ${x} y ${y} ${w}×${h}`;
+}
+
+function renderList(){
+  listEl.innerHTML = '';
+  if (!items().length){
+    const d = document.createElement('div');
+    d.className = 'empty';
+    d.textContent = '还没有标注。在左边图上拖一个框试试。';
+    listEl.appendChild(d);
+    return;
+  }
+  items().forEach((it, i) => {
+    const d = document.createElement('div');
+    d.className = 'item' + (i === S.sel ? ' sel' : '') + (it.hidden ? ' off' : '');
+    const kindTag = it.type === 'box' ? '框' : (it.type === 'point' ? '点' : '多边');
+    d.innerHTML = `
+      <div class="row">
+        <button class="eye${it.hidden ? ' off' : ''}" data-eye="${i}"
+                title="${it.hidden ? '显示这一项' : '隐藏这一项'}">${it.hidden ? '🚫' : '👁'}</button>
+        <span class="tag ${it.type}">${kindTag}</span>
+        <input type="text" value="${String(it.name||'').replace(/"/g,'&quot;')}" spellcheck="false">
+        <button data-del="${i}" title="删除">×</button>
+      </div>
+      <div class="coord" style="margin-top:4px">${coordText(it)}</div>`;
+
+    const input = d.querySelector('input');
+    input.addEventListener('focus', () => pushUndo());
+    input.addEventListener('input', e => {
+      items()[i].name = e.target.value;
+      draw(); markDirty();
+    });
+    d.querySelector('[data-eye]').addEventListener('click', e => {
+      e.stopPropagation();
+      items()[i].hidden = !items()[i].hidden;
+      renderList(); draw();
+    });
+    d.querySelector('[data-del]').addEventListener('click', e => {
+      e.stopPropagation();
+      pushUndo();
+      items().splice(i, 1);
+      S.sel = -1;
+      renderList(); draw(); markDirty();
+    });
+    d.addEventListener('click', e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      S.sel = i; renderList(); draw();
+    });
+    listEl.appendChild(d);
+  });
+}
+
+function nextName(){
+  let n = items().length + 1;
+  while (items().some(it => it.name === 'item' + n)) n++;
+  return 'item' + n;
+}
+
+/* ---------- polygon ---------- */
+
+function addPolyPoint(ix, iy){
+  if (!S.poly) S.poly = [];
+  const p = clampPt([ix, iy]);
+  // 点回起点就闭合（起点附近 8 CSS px）
+  if (S.poly.length >= 3){
+    const [fx, fy] = cssPoint(S.poly[0]);
+    const [px, py] = cssPoint(p);
+    if (Math.hypot(px-fx, py-fy) <= 8){ closePolygon(); return; }
+  }
+  // 连续重复点没有意义
+  const last = S.poly[S.poly.length-1];
+  if (last && last[0] === p[0] && last[1] === p[1]) return;
+  S.poly.push(p);
+  draw();
+}
+
+function closePolygon(){
+  if (!S.poly || S.poly.length < 3){
+    toast('至少要点 3 个点才能闭合', 'err');
+    return;
+  }
+  pushUndo();
+  items().push({
+    name: nextName(), type: 'polygon',
+    points: S.poly.map(p => [p[0], p[1]]), note: ''
+  });
+  S.sel = items().length - 1;
+  S.poly = null; S.hover = null;
+  renderList(); draw(); markDirty();
+}
+
+function cancelPolygon(){
+  if (!S.poly) return;
+  S.poly = null; S.hover = null;
+  draw();
+  toast('已放弃这个多边形');
+}
+
+/* ---------- pointer ---------- */
+
+cv.addEventListener('pointerdown', ev => {
+  if (!cur()) return;
+  // 中键拖 / 空格+左键拖 = 平移，跟标注操作不冲突
+  if (ev.button === 1 || (ev.button === 0 && S.space)){
+    ev.preventDefault();
+    try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* 同上 */ }
+    drag = { kind:'pan', sx: ev.clientX, sy: ev.clientY, px: S.panX, py: S.panY };
+    applyCursor();
+    return;
+  }
+  if (ev.button !== 0) return;
+  if (S.hideAll) return;                      // 图层隐藏时不接受操作，避免点中看不见的东西
+  try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* 老浏览器/合成事件可能不支持 */ }
+  const [px, py] = viewPt(ev);
+  const [ix, iy] = toImg(ev);
+
+  if (S.mode === 'polygon' && S.poly){
+    addPolyPoint(ix, iy);
+    return;
+  }
+
+  const handle = hitHandle(px, py);
+  if (handle){
+    pushUndo();
+    drag = { kind:'resize', handle, x0:ix, y0:iy, orig: items()[S.sel].box.slice() };
+    return;
+  }
+
+  const vk = hitVertex(px, py);
+  if (vk >= 0){
+    pushUndo();
+    drag = { kind:'vertex', idx:vk, x0:ix, y0:iy, orig: items()[S.sel].points.map(p => p.slice()) };
+    return;
+  }
+
+  const hit = hitItem(px, py);
+  if (hit >= 0){
+    S.sel = hit;
+    const it = items()[hit];
+    pushUndo();
+    if (it.type === 'box'){
+      drag = { kind:'move', x0:ix, y0:iy, orig: it.box.slice() };
+    } else if (it.type === 'polygon'){
+      drag = { kind:'polymove', x0:ix, y0:iy, orig: it.points.map(p => p.slice()) };
+    }
+    renderList(); draw();
+    return;
+  }
+
+  if (S.mode === 'point'){
+    pushUndo();
+    items().push({ name: nextName(), type:'point', point:[ix, iy], note:'' });
+    S.sel = items().length - 1;
+    renderList(); draw();
+    return;
+  }
+
+  if (S.mode === 'polygon'){
+    addPolyPoint(ix, iy);
+    return;
+  }
+
+  drag = { kind:'new', x0:ix, y0:iy, x1:ix, y1:iy };
+  draw();
+});
+
+cv.addEventListener('pointermove', ev => {
+  const [ix, iy] = toImg(ev);
+  S.lastPt = [ix, iy];
+  document.getElementById('cursor').textContent = `(${ix}, ${iy})`;
+  placeLoupe(ev.clientX, ev.clientY);
+  drawLoupe(ix, iy);
+
+  if (drag && drag.kind === 'pan'){
+    S.panX = drag.px + (ev.clientX - drag.sx);
+    S.panY = drag.py + (ev.clientY - drag.sy);
+    clampPan();
+    applyView();
+    return;
+  }
+
+  if (S.poly && S.mode === 'polygon' && !drag){
+    S.hover = [ix, iy];
+    draw();
+    return;
+  }
+  if (!drag) return;
+
+  if (drag.kind === 'new'){
+    drag.x1 = ix; drag.y1 = iy; draw();
+    return;
+  }
+  const it = items()[S.sel];
+  if (!it) return;
+  const dx = ix - drag.x0, dy = iy - drag.y0;
+
+  if (drag.kind === 'polymove'){
+    it.points = drag.orig.map(([x, y]) => [x + dx, y + dy]);
+  } else if (drag.kind === 'vertex'){
+    it.points[drag.idx] = [drag.orig[drag.idx][0] + dx, drag.orig[drag.idx][1] + dy];
+  } else {
+    const [ox,oy,ow,oh] = drag.orig;
+    if (drag.kind === 'move'){
+      it.box = [ox+dx, oy+dy, ow, oh];
+    } else {
+      let x = ox, y = oy, w = ow, h = oh;
+      const hd = drag.handle;
+      if (hd.includes('w')) { x = ox + dx; w = ow - dx; }
+      if (hd.includes('e')) { w = ow + dx; }
+      if (hd.includes('n')) { y = oy + dy; h = oh - dy; }
+      if (hd.includes('s')) { h = oh + dy; }
+      if (w < 6) { w = 6; }
+      if (h < 6) { h = 6; }
+      it.box = [x, y, w, h];
+    }
+  }
+  draw();
+});
+
+cv.addEventListener('pointerup', ev => {
+  if (!drag) return;
+  const kind = drag.kind;
+  if (kind === 'pan'){
+    drag = null;
+    applyCursor();
+    return;
+  }
+  if (kind === 'new'){
+    const x = Math.min(drag.x0, drag.x1), y = Math.min(drag.y0, drag.y1);
+    const w = Math.abs(drag.x1-drag.x0), h = Math.abs(drag.y1-drag.y0);
+    drag = null;
+    if (w >= 6 && h >= 6){
+      pushUndo();
+      items().push({ name: nextName(), type:'box', box:[x,y,w,h], note:'' });
+      S.sel = items().length - 1;
+      renderList();
+    }
+    draw();
+    return;
+  }
+  drag = null;
+  const it = items()[S.sel];
+  if (it && it.type === 'box'){
+    const [x,y,w,h] = it.box;
+    const nw = Math.max(6, Math.min(w, size()[0]-x));
+    const nh = Math.max(6, Math.min(h, size()[1]-y));
+    it.box = [Math.max(0,x), Math.max(0,y), nw, nh];
+  } else if (it && it.type === 'polygon'){
+    it.points = it.points.map(clampPt);
+  }
+  markDirty(); draw();
+});
+
+// 双击闭合多边形
+cv.addEventListener('dblclick', ev => {
+  if (S.mode === 'polygon' && S.poly && S.poly.length >= 3){
+    ev.preventDefault();
+    closePolygon();
+  }
+});
+
+/* ---------- zoom ---------- */
+
+stage.addEventListener('wheel', ev => {
+  if (!S.wheelZoom || !cur()) return;
+  ev.preventDefault();
+  // 触控板是一串小 delta，鼠标滚轮一格约 100；指数形式两种都顺手
+  const f = Math.min(2, Math.max(0.5, Math.pow(1.0018, -ev.deltaY)));
+  zoomAt(f, ev.clientX, ev.clientY);
+}, { passive: false });
+
+function zoomAround(f){
+  const r = stage.getBoundingClientRect();
+  zoomAt(f, r.left + r.width/2, r.top + r.height/2);
+}
+
+document.getElementById('zoomIn').onclick  = () => zoomAround(1.25);
+document.getElementById('zoomOut').onclick = () => zoomAround(1/1.25);
+document.getElementById('zoomFit').onclick = resetView;
+document.getElementById('wheelToggle').onclick = () => {
+  S.wheelZoom = !S.wheelZoom;
+  document.getElementById('wheelToggle').classList.toggle('on', S.wheelZoom);
+  toast(S.wheelZoom ? '滚轮缩放：开' : '滚轮缩放：关（用左下角的 − / + 缩放）');
+};
+
+/* ---------- loupe ---------- */
+
+const LOUPE_PX = 200;                       // 窗口显示边长（CSS px）
+const loupeEl  = document.getElementById('loupe');
+const loupeCv  = document.getElementById('loupeCv');
+const loupeCtx = loupeCv.getContext('2d');
+
+function loupeResize(){
+  const dpr = window.devicePixelRatio || 1;
+  loupeCv.width  = Math.round(LOUPE_PX * dpr);
+  loupeCv.height = Math.round(LOUPE_PX * dpr);
+  loupeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function loupeMeasure(){
+  S.loupeW = loupeEl.offsetWidth || 202;
+  S.loupeH = loupeEl.offsetHeight || 222;
+}
+
+// 只画图像本身：放大镜是拿来读像素的，被自己的标注框挡住就没意义了
+function drawLoupe(ix, iy){
+  if (!S.loupe || !imgEl.naturalWidth) return;
+  const N = S.loupeN, W = LOUPE_PX, k = W / N;
+  const sx = ix - N/2, sy = iy - N/2;
+  const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
+  loupeCtx.imageSmoothingEnabled = false;
+  loupeCtx.fillStyle = '#0b0d12';
+  loupeCtx.fillRect(0, 0, W, W);
+  const x0 = Math.max(0, sx), y0 = Math.max(0, sy);
+  const x1 = Math.min(nw, sx + N), y1 = Math.min(nh, sy + N);
+  if (x1 > x0 && y1 > y0){
+    loupeCtx.drawImage(imgEl, x0, y0, x1-x0, y1-y0,
+                       (x0-sx)*k, (y0-sy)*k, (x1-x0)*k, (y1-y0)*k);
+  }
+  // 光标所在的那一个像素：框线画在格子外面，格子内部留干净 —— 放大镜就是
+  // 用来看这一个像素的，被自己的准星盖住就白做了
+  const cx = (ix - sx) * k, cy = (iy - sy) * k;
+  // 格子只有 k 像素宽，框线一粗就把格子本身盖住了 —— 只在格子够大时才画框，
+  // 小倍率靠下面那圈刻度指位置
+  if (k >= 4){
+    loupeCtx.lineWidth = 1;
+    loupeCtx.strokeStyle = 'rgba(0,0,0,.85)';
+    loupeCtx.strokeRect(cx - 1.5, cy - 1.5, k + 3, k + 3);
+    loupeCtx.strokeStyle = '#4a9eff';
+    loupeCtx.strokeRect(cx - 0.5, cy - 0.5, k + 1, k + 1);
+  }
+  // 准星只画一小段刻度，不贯穿整个窗口 —— 贯穿会盖住同一行/列的相邻像素，
+  // 那些像素正是用来看清边缘过渡的
+  const mx = cx + k/2, my = cy + k/2, tick = 14;
+  loupeCtx.strokeStyle = 'rgba(74,158,255,.45)';
+  loupeCtx.beginPath();
+  loupeCtx.moveTo(mx, cy - 3);            loupeCtx.lineTo(mx, cy - 3 - tick);
+  loupeCtx.moveTo(mx, cy + k + 3);        loupeCtx.lineTo(mx, cy + k + 3 + tick);
+  loupeCtx.moveTo(cx - 3, my);            loupeCtx.lineTo(cx - 3 - tick, my);
+  loupeCtx.moveTo(cx + k + 3, my);        loupeCtx.lineTo(cx + k + 3 + tick, my);
+  loupeCtx.stroke();
+  document.getElementById('loupeInfo').textContent =
+    `${N}×${N} · ${k.toFixed(1)}× · (${ix}, ${iy})`;
+}
+
+function clampLoupe(){
+  if (!S.loupe) return;
+  const maxX = Math.max(4, stage.clientWidth - S.loupeW - 4);
+  const maxY = Math.max(4, stage.clientHeight - S.loupeH - 4);
+  loupeEl.style.left = Math.min(maxX, Math.max(4, parseFloat(loupeEl.style.left) || 4)) + 'px';
+  loupeEl.style.top  = Math.min(maxY, Math.max(4, parseFloat(loupeEl.style.top) || 4)) + 'px';
+}
+
+// 未固定时跟着指针跑；快出界就翻到指针另一侧
+function placeLoupe(clientX, clientY){
+  if (!S.loupe || S.loupePinned) return;
+  const r = stage.getBoundingClientRect();
+  let x = clientX - r.left + 26, y = clientY - r.top + 26;
+  if (x + S.loupeW > r.width - 6)  x = clientX - r.left - S.loupeW - 26;
+  if (y + S.loupeH > r.height - 6) y = clientY - r.top - S.loupeH - 26;
+  loupeEl.style.left = Math.min(Math.max(6, x), Math.max(6, r.width - S.loupeW - 6)) + 'px';
+  loupeEl.style.top  = Math.min(Math.max(6, y), Math.max(6, r.height - S.loupeH - 6)) + 'px';
+}
+
+function setLoupePin(v){
+  S.loupePinned = !!v;
+  const b = document.getElementById('loupePin');
+  b.textContent = S.loupePinned ? '已固定' : '跟随中';
+  b.classList.toggle('on', S.loupePinned);
+}
+
+function setLoupe(v){
+  S.loupe = !!v;
+  document.getElementById('loupeToggle').classList.toggle('on', S.loupe);
+  document.getElementById('loupeSize').disabled = !S.loupe;
+  loupeEl.hidden = !S.loupe;
+  if (!S.loupe) return;
+  loupeResize();
+  loupeMeasure();
+  if (!S.loupePinned && !loupeEl.style.left){
+    loupeEl.style.left = Math.max(6, stage.clientWidth - S.loupeW - 12) + 'px';
+    loupeEl.style.top = '12px';
+  }
+  clampLoupe();
+  const p = S.lastPt || [Math.round(imgEl.naturalWidth/2), Math.round(imgEl.naturalHeight/2)];
+  drawLoupe(p[0], p[1]);
+}
+
+document.getElementById('loupeToggle').onclick = () => setLoupe(!S.loupe);
+document.getElementById('loupeSize').onchange = e => {
+  S.loupeN = parseInt(e.target.value, 10) || 80;
+  if (S.lastPt) drawLoupe(S.lastPt[0], S.lastPt[1]);
+};
+document.getElementById('loupePin').onclick = e => {
+  e.stopPropagation();
+  setLoupePin(!S.loupePinned);
+};
+
+// 拖标题栏 = 移动窗口；拖过之后就不再自动跟随
+document.querySelector('#loupe .lh').addEventListener('pointerdown', ev => {
+  if (ev.target.id === 'loupePin') return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const head = ev.currentTarget;
+  const sx = ev.clientX, sy = ev.clientY;
+  const l0 = parseFloat(loupeEl.style.left) || 0, t0 = parseFloat(loupeEl.style.top) || 0;
+  try { head.setPointerCapture(ev.pointerId); } catch (e) { /* 同上 */ }
+  setLoupePin(true);
+  const move = e2 => {
+    const maxX = Math.max(4, stage.clientWidth - S.loupeW - 4);
+    const maxY = Math.max(4, stage.clientHeight - S.loupeH - 4);
+    loupeEl.style.left = Math.min(maxX, Math.max(4, l0 + e2.clientX - sx)) + 'px';
+    loupeEl.style.top  = Math.min(maxY, Math.max(4, t0 + e2.clientY - sy)) + 'px';
+  };
+  const up = () => {
+    head.removeEventListener('pointermove', move);
+    head.removeEventListener('pointerup', up);
+  };
+  head.addEventListener('pointermove', move);
+  head.addEventListener('pointerup', up);
+});
+
+/* ---------- modes / keys ---------- */
+
+function setMode(m){
+  S.mode = m;
+  if (m !== 'polygon' && S.poly) cancelPolygon();
+  document.getElementById('mBox').classList.toggle('on', m === 'box');
+  document.getElementById('mPt').classList.toggle('on', m === 'point');
+  document.getElementById('mPoly').classList.toggle('on', m === 'polygon');
+  applyCursor();
+}
+
+function applyCursor(){
+  cv.style.cursor = (drag && drag.kind === 'pan') ? 'grabbing'
+                  : S.space ? 'grab'
+                  : S.mode === 'polygon' ? 'copy' : 'crosshair';
+}
+
+function setHideAll(v){
+  S.hideAll = !!v;
+  document.getElementById('hide').classList.toggle('on', S.hideAll);
+  cv.classList.toggle('hidden-layer', S.hideAll);
+  document.getElementById('hide').innerHTML = (S.hideAll ? '显示标注' : '隐藏标注') + ' <kbd>H</kbd>';
+  draw();
+}
+
+document.getElementById('mBox').onclick = () => setMode('box');
+document.getElementById('mPt').onclick  = () => setMode('point');
+document.getElementById('mPoly').onclick = () => setMode('polygon');
+document.getElementById('hide').onclick = () => setHideAll(!S.hideAll);
+document.getElementById('undo').onclick = undo;
+document.getElementById('redo').onclick = redo;
+document.getElementById('del').onclick = () => {
+  if (S.sel < 0) { toast('先点一下要删的那一项'); return; }
+  pushUndo();
+  items().splice(S.sel, 1);
+  S.sel = -1;
+  renderList(); draw(); markDirty();
+};
+
+document.addEventListener('keydown', ev => {
+  const tag = (ev.target.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA') {
+    if (ev.key === 'Escape') ev.target.blur();
+    return;
+  }
+  if (ev.key === '1') { setMode('box'); return; }
+  if (ev.key === '2') { setMode('point'); return; }
+  if (ev.key === '3') { setMode('polygon'); return; }
+  if (ev.key.toLowerCase() === 'h') { setHideAll(!S.hideAll); return; }
+  if (ev.key.toLowerCase() === 'l') { setLoupe(!S.loupe); return; }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key === '0') { ev.preventDefault(); resetView(); return; }
+  if (ev.key === ' '){
+    if (!ev.repeat){ S.space = true; applyCursor(); }
+    ev.preventDefault();
+    return;
+  }
+  if (ev.key === 'Enter' && S.poly) { ev.preventDefault(); closePolygon(); return; }
+  if (ev.key === 'Escape' && S.poly) { ev.preventDefault(); cancelPolygon(); return; }
+  if (ev.key === 'Backspace' && S.poly){
+    ev.preventDefault();
+    S.poly.pop();
+    if (!S.poly.length) S.poly = null;
+    draw();
+    return;
+  }
+  if (ev.key === 'Delete' || ev.key === 'Backspace') {
+    ev.preventDefault();
+    document.getElementById('del').click();
+    return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+    ev.preventDefault();
+    if (ev.shiftKey) redo(); else undo();
+    return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') {
+    ev.preventDefault(); redo();
+  }
+});
+
+window.addEventListener('resize', layout);
+
+document.addEventListener('keyup', ev => {
+  if (ev.key === ' '){ S.space = false; applyCursor(); }
+});
+
+// 切窗口回来时按键状态可能已经丢了，不清掉会卡在「平移」模式
+window.addEventListener('blur', () => { S.space = false; applyCursor(); });
+
+window.addEventListener('beforeunload', ev => {
+  if (!S.dirty) return;
+  ev.preventDefault();
+  ev.returnValue = '';
+});
+
+/* ---------- tabs ---------- */
+
+function buildTabs(){
+  const box = document.getElementById('tabs');
+  box.innerHTML = '';
+  if (S.images.length < 2) return;
+  S.images.forEach((m, i) => {
+    const b = document.createElement('button');
+    b.textContent = m.name || m.id;
+    b.title = `${m.id} · ${m.size ? m.size.join('×') : ''}`;
+    b.className = i === S.cur ? 'on' : '';
+    b.onclick = () => selectImage(i);
+    box.appendChild(b);
+  });
+}
+
+/* ---------- loading ---------- */
+
+function loadInto(m, b64){
+  return new Promise(resolve => {
+    const probe = new Image();
+    probe.onload = () => {
+      m.loaded = true;
+      m.size = [probe.naturalWidth, probe.naturalHeight];
+      m.src = probe.src;
+      resolve();
+    };
+    probe.onerror = () => resolve();
+    probe.src = 'data:image/jpeg;base64,' + b64;
+  });
+}
+
+async function selectImage(i, preloaded){
+  S.cur = i;
+  S.sel = -1;
+  S.poly = null; S.hover = null;
+  const m = S.images[i];
+  if (!m) return;
+  if (!m.loaded){
+    let data = preloaded;
+    if (!data){
+      const r = await fetch('/frame?img=' + encodeURIComponent(m.id));
+      const j = await r.json();
+      if (!j.ok) { showError(j.error || '取图失败'); return; }
+      data = j.jpeg;
+    }
+    await loadInto(m, data);
+  }
+  imgEl.src = m.src;
+  await new Promise(res => { if (imgEl.complete) res(); else imgEl.onload = res; });
+  const fbtn = document.getElementById('fresh');
+  fbtn.style.display = m.refreshable ? '' : 'none';
+  buildTabs();
+  S.lastPt = null;
+  layout(); resetView();
+  if (S.loupe) setLoupe(true);
+  renderList();
+}
+
+async function boot(){
+  let j;
+  try {
+    const r = await fetch('/frame');
+    j = await r.json();
+  } catch (e){
+    showError('连不上本地服务。请确认 annotate-mcp 还在运行，然后刷新页面。');
+    return;
+  }
+  if (!j.ok){ showError(j.error || '取图失败'); return; }
+
+  S.session = j.session;
+  S.name = j.name || 'board_ui';
+  document.getElementById('sessionPill').textContent = j.session;
+  document.getElementById('setName').value = S.name;
+  document.title = `标注 · ${S.name}`;
+  if (j.saved_at) setState('已保存 rev ' + j.rev, 'ok');
+
+  S.images = (j.images || []).map(m => ({
+    id: m.id, name: m.name, size: m.size, refreshable: !!m.refreshable,
+    items: (m.items || []).map(it => JSON.parse(JSON.stringify(it))),
+    loaded: false, src: ''
+  }));
+  undoStack = []; redoStack = []; S.dirty = false;
+  buildTabs();
+  await selectImage(0, j.jpeg);
+}
+
+document.getElementById('setName').addEventListener('input', e => {
+  S.name = e.target.value;
+});
+
+document.getElementById('fresh').onclick = async () => {
+  const m = cur();
+  if (!m) return;
+  const r = await fetch('/frame?fresh=1&img=' + encodeURIComponent(m.id));
+  const j = await r.json();
+  if (!j.ok){ toast('重抓失败：' + (j.error || ''), 'err'); return; }
+  await loadInto(m, j.jpeg);
+  imgEl.src = m.src;
+  await new Promise(res => { if (imgEl.complete) res(); else imgEl.onload = res; });
+  layout();
+  toast('已重抓画面');
+};
+
+document.getElementById('save').onclick = async () => {
+  if (!S.images.length){ toast('没有可保存的图片', 'err'); return; }
+  if (S.poly && S.poly.length >= 3 && !confirm('多边形还没闭合，仍要保存？')) return;
+  const unnamed = items().filter(it => !it.name || /^item\d+$/.test(it.name));
+  if (unnamed.length && !confirm(`还有 ${unnamed.length} 项没改名（item1…），仍要保存？`)) return;
+
+  const payload = {
+    name: S.name,
+    images: S.images.map(m => ({ id: m.id, items: m.items }))
+  };
+  const btn = document.getElementById('save');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+    if (!j.ok){ toast('保存失败：' + (j.error || ''), 'err'); return; }
+    S.dirty = false;
+    setState('已保存 rev ' + j.rev, 'ok');
+    const w = j.written || {};
+    const tpl = (w.templates || []).length;
+    toast(`已保存 ${j.total_items} 项，${tpl} 个模板 · rev ${j.rev}`, 'ok');
+  } catch (e){
+    toast('保存失败：' + e, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+boot();
+</script>
+</body>
+</html>

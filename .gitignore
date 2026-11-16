@@ -1,0 +1,31 @@
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+
+# Build output
+build/
+dist/
+
+# Manual verification artefacts (screenshots, sample images, result dumps)
+tests/manual/out/
+
+# Handoff note for new sessions: contains this machine's absolute paths
+交接文档-新会话.md
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local annotation data, if someone points --data-dir at the repo
+annotations/
+templates/
+exports/
+sources/
